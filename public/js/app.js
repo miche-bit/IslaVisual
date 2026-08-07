@@ -255,7 +255,6 @@ function renderAuth(mode) {
                     : `¿Ya posee una cuenta profesional? <button id="switch-link">Inicie sesión</button>`}
         </div>
       </div>
-      <p class="footer-line" style="position:relative; z-index:1; margin-top:22px; text-align:center;">Desarrollado por <span style="font-family:var(--font-mono); color:var(--gold-ink); font-weight:600;">爪丨匚卄乇.studios</span></p>
     </div>`;
 
     document.getElementById('switch-link').addEventListener('click', () => {
