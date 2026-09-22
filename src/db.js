@@ -83,9 +83,23 @@ CREATE TABLE IF NOT EXISTS backup_log (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS library_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uploaded_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  titulo TEXT NOT NULL,
+  descripcion TEXT,
+  categoria TEXT NOT NULL CHECK (categoria IN ('imagen','video','documento')),
+  filename TEXT NOT NULL,
+  original_name TEXT,
+  size_bytes INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_patients_doctor ON patients(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_photos_patient ON photos(patient_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_library_created ON library_items(created_at);
 `);
 
 module.exports = db;

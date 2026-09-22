@@ -123,17 +123,19 @@ input, select, textarea { font-family: var(--font-body); }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: none; border-radius: 999px; padding: 11px 22px; font-size: .89rem; font-weight: 600;
-  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, filter 160ms ease;
 }
 .btn:active { transform: scale(.97); }
 .btn-primary { background: var(--teal); color: #fff; box-shadow: var(--shadow-sm); }
-.btn-primary:hover { background: var(--teal-deep); }
 .btn-gold { background: var(--gold); color: #2b1d05; box-shadow: var(--shadow-sm); }
-.btn-gold:hover { filter: brightness(1.05); }
+.btn-danger { background: var(--danger-tint); color: var(--danger); }
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover { background: var(--teal-deep); transform: translateY(-1.5px); box-shadow: var(--shadow); }
+  .btn-gold:hover { filter: brightness(1.05); transform: translateY(-1.5px); box-shadow: var(--shadow); }
+  .btn-danger:hover { background: var(--danger); color: #fff; transform: translateY(-1.5px); }
+}
 .btn-ghost { background: transparent; color: var(--teal-deep); border: 1px solid var(--line); }
 .btn-ghost:hover { background: var(--paper); border-color: var(--teal); }
-.btn-danger { background: var(--danger-tint); color: var(--danger); }
-.btn-danger:hover { background: var(--danger); color: #fff; }
 .btn-sm { padding: 7px 14px; font-size: .78rem; }
 .btn-block { width: 100%; }
 .btn[disabled] { opacity: .55; pointer-events: none; }
@@ -333,14 +335,25 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .modal-sub { color: var(--ink-soft); font-size: .85rem; margin-bottom: 20px; display: block; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 
+.confirm-icon {
+  width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--teal-tint); color: var(--teal); margin: 0 auto 16px;
+  animation: confirmIconPop 340ms cubic-bezier(.2,.9,.25,1) both;
+}
+.confirm-icon-danger { background: var(--danger-tint); color: var(--danger); }
+@keyframes confirmIconPop { from { transform: scale(.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
 .lightbox-backdrop {
   position: fixed; inset: 0; background: rgba(6,20,18,0.92); z-index: 300;
   display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 30px;
-  animation: fadeIn 200ms ease;
+  animation: fadeIn 200ms ease; outline: none;
 }
-.lightbox-backdrop img { max-width: min(90vw, 800px); max-height: 68vh; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.lightbox-backdrop img, .lightbox-backdrop video { max-width: min(90vw, 800px); max-height: 68vh; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.lightbox-backdrop iframe { width: min(92vw, 900px); height: 75vh; max-height: 78vh; border: none; border-radius: 10px; background: #fff; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
 .lightbox-info { color: #F3EFE4; text-align: center; margin-top: 16px; max-width: 560px; }
 .lightbox-info .photo-date { color: var(--gold); }
+.lib-lightbox-fallback { display: flex; flex-direction: column; align-items: center; gap: 14px; color: #F3EFE4; }
+.lib-lightbox-fallback .lib-icon { font-size: 3.4rem; }
 .lightbox-close { position: absolute; top: 22px; right: 26px; color: #fff; }
 
 /* dropzone */
@@ -410,7 +423,16 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   .chip-name { display: none; }
   .user-chip { padding: 6px; }
   .brand-text { font-size: .95rem; }
-  .topbar-actions { gap: 8px; }
+  .topbar-actions { gap: 6px; }
+  .topbar-actions .btn-sm { padding: 8px 12px; font-size: .82rem; }
+}
+
+/* Salvaguarda final en los teléfonos más angostos (~320px): si aun así no cabe todo en una
+   fila, se ajusta a una segunda línea dentro de la propia topbar en vez de producir scroll
+   horizontal en la página completa. */
+@media (max-width: 380px) {
+  .topbar-inner { flex-wrap: wrap; row-gap: 8px; }
+  .topbar-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
 }
 
 .hidden { display: none !important; }
@@ -428,3 +450,42 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .app-footer .footer-line { color: var(--ink-soft); font-size: .78rem; margin: 0 0 4px; }
 .app-footer .studio-credit { color: var(--ink-soft); font-size: .74rem; opacity: .85; margin: 0; }
 .app-footer .studio-credit .studio-name { font-family: var(--font-mono); color: var(--gold-ink); font-weight: 600; letter-spacing: .02em; }
+.app-footer .studio-credit .studio-phone { font-family: var(--font-mono); letter-spacing: .02em; }
+
+/* ---------- Biblioteca Clínica ---------- */
+.library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 18px; padding-bottom: 60px; }
+.library-card {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden;
+  box-shadow: var(--shadow-sm); transition: transform 180ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .library-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+}
+.lib-card-preview {
+  display: flex; align-items: center; justify-content: center; height: 130px; text-decoration: none;
+  background: var(--teal-tint); width: 100%; border: none; padding: 0; margin: 0;
+  font: inherit; cursor: pointer; color: inherit;
+}
+.lib-card-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lib-card-preview.lib-cat-video { background: var(--teal-tint); }
+.lib-card-preview.lib-cat-documento { background: var(--gold-soft); }
+.lib-icon { font-size: 2.4rem; }
+.lib-card-body { padding: 14px 16px 16px; }
+.lib-card-body h4 { font-size: 1rem; margin-bottom: 5px; line-height: 1.3; }
+.lib-desc { font-size: .84rem; color: var(--ink-soft); line-height: 1.45; margin-bottom: 10px; }
+.lib-meta { display: flex; justify-content: space-between; font-size: .72rem; color: var(--ink-soft); margin-bottom: 12px; gap: 8px; }
+.lib-meta span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---------- Preferencia de movimiento reducido (accesibilidad) ----------
+   Quien tenga activada esta preferencia del sistema (sensibilidad vestibular,
+   mareo por movimiento, etc.) recibe la app sin animaciones ni transiciones,
+   sin perder ninguna funcionalidad. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

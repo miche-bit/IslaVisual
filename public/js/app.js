@@ -39,7 +39,10 @@ function toast(message, type = 'success') {
   const wrap = document.getElementById('toast-wrap');
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.textContent = message;
+  const icon = type === 'error'
+    ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>`
+    : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>`;
+  el.innerHTML = `<span class="toast-icon">${icon}</span><span>${escapeHtml(message)}</span>`;
   wrap.appendChild(el);
   setTimeout(() => {
     el.style.transition = 'opacity 300ms ease, transform 300ms ease';
@@ -87,6 +90,10 @@ function todayISO() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+function staggerStyle(index) {
+  return `animation-delay:${Math.min(index, 10) * 45}ms`;
+}
+
 function fmtBytes(bytes) {
   if (!bytes) return '0 MB';
   const mb = bytes / (1024 * 1024);
@@ -96,7 +103,12 @@ function fmtBytes(bytes) {
 
 /* ---------------------------- Iris transition ---------------------------- */
 
+function prefersReducedMotion() {
+  return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 function withIrisTransition(renderFn) {
+  if (prefersReducedMotion()) return renderFn();
   const veil = document.createElement('div');
   veil.className = 'iris-veil closing';
   document.body.appendChild(veil);
@@ -143,6 +155,7 @@ async function router() {
     case 'doctor': return renderDoctorFolder(params[0]);
     case 'patient': return renderPatient(params[0]);
     case 'admin': return renderAdmin();
+    case 'biblioteca': return renderLibrary();
     default: return renderDashboard();
   }
 }
@@ -161,6 +174,7 @@ function topbarHtml() {
     <div class="topbar-inner">
       <a href="#/dashboard" class="brand"><span class="brand-mark"></span><span class="brand-text">IslaVisual</span></a>
       <div class="topbar-actions">
+        <a href="#/biblioteca" class="btn btn-ghost btn-sm">Biblioteca</a>
         ${u.is_admin ? `<a href="#/admin" class="btn btn-ghost btn-sm">Admin</a>` : ''}
         <div class="user-chip" title="${escapeHtml(fullName)}">
           <span class="avatar-dot">${initials(u.nombre, u.apellidos)}</span>
@@ -187,7 +201,7 @@ function globalFooterHtml() {
   return `
   <footer class="app-footer">
     <p class="footer-line">IslaVisual · información clínica de acceso restringido al cuerpo facultativo autenticado</p>
-    <p class="studio-credit">Desarrollado por <span class="studio-name">爪丨匚卄乇.studios</span></p>
+    <p class="studio-credit">Desarrollado por <span class="studio-name">爪丨匚卄乇.studios</span> · <span class="studio-phone">+53 55633280</span></p>
   </footer>`;
 }
 
@@ -301,8 +315,8 @@ function renderDashboard() {
       toast(err.message, 'error');
     }
 
-    const cards = doctors.map((d) => `
-      <div class="folder-card view-enter" data-id="${d.id}" tabindex="0" role="button" aria-label="Consultar carpeta clínica de ${escapeHtml(folderTitleOf(d))}">
+    const cards = doctors.map((d, idx) => `
+      <div class="folder-card view-enter" style="${staggerStyle(idx)}" data-id="${d.id}" tabindex="0" role="button" aria-label="Consultar carpeta clínica de ${escapeHtml(folderTitleOf(d))}">
         <div class="fc-top">
           <div class="fc-avatar">${initials(d.nombre, d.apellidos)}</div>
           ${d.id === state.user.id ? '<span class="fc-badge-me">Titular</span>' : ''}
@@ -405,8 +419,8 @@ function renderDoctorFolder(doctorId) {
         wrap.innerHTML = `<div class="empty-state"><h3>Aún no se han incorporado pacientes</h3><p>${isOwner ? 'Incorpore el primer paciente mediante el control dispuesto en la parte superior.' : 'El médico titular aún no ha incorporado pacientes a esta carpeta clínica.'}</p></div>`;
         return;
       }
-      wrap.innerHTML = `<div class="patient-list">${patients.map((p) => `
-        <div class="patient-card view-enter" data-id="${p.id}" tabindex="0" role="button" aria-label="Consultar expediente de ${escapeHtml(p.nombre)} ${escapeHtml(p.apellidos)}" data-search="${escapeHtml((p.nombre + ' ' + p.apellidos).toLowerCase())}">
+      wrap.innerHTML = `<div class="patient-list">${patients.map((p, idx) => `
+        <div class="patient-card view-enter" style="${staggerStyle(idx)}" data-id="${p.id}" tabindex="0" role="button" aria-label="Consultar expediente de ${escapeHtml(p.nombre)} ${escapeHtml(p.apellidos)}" data-search="${escapeHtml((p.nombre + ' ' + p.apellidos).toLowerCase())}">
           <h4>${escapeHtml(p.nombre)} ${escapeHtml(p.apellidos)}</h4>
           <div>
             <span class="patient-tag">${p.edad} años</span>
@@ -461,7 +475,65 @@ function openModal(html) {
   backdrop.innerHTML = `<div class="modal-box">${html}</div>`;
   document.body.appendChild(backdrop);
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+  // Cierre con Escape: funciona porque el foco se mueve dentro del modal (ver más abajo),
+  // así que la tecla burbujea hasta este elemento sin necesitar un listener global que
+  // luego haya que recordar remover.
+  backdrop.addEventListener('keydown', (e) => { if (e.key === 'Escape') backdrop.remove(); });
+
+  // Foco automático en el primer campo REALMENTE visible (evita enfocar un <input type="file">
+  // oculto con display:none que precede a otros campos en el DOM de los modales de subida).
+  const candidates = backdrop.querySelectorAll('input, select, textarea');
+  for (const el of candidates) {
+    if (el.type === 'hidden' || el.offsetParent === null) continue;
+    el.focus();
+    break;
+  }
   return backdrop;
+}
+
+/**
+ * Diálogo de confirmación animado y coherente con la identidad visual de la app,
+ * en sustitución del confirm() nativo del navegador (no estilizable y visualmente
+ * discordante). Se resuelve en true si el usuario confirma, false en cualquier otro
+ * cierre (botón Cancelar, clic fuera del modal, o tecla Escape).
+ */
+function confirmDialog({ title = 'Confirmar acción', message, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', danger = true }) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const iconSvg = danger
+      ? `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>`
+      : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>`;
+
+    const backdrop = openModal(`
+      <div style="text-align:center;">
+        <div class="confirm-icon ${danger ? 'confirm-icon-danger' : ''}">${iconSvg}</div>
+        <h2>${escapeHtml(title)}</h2>
+        <p class="modal-sub" style="margin-bottom:22px;">${escapeHtml(message)}</p>
+      </div>
+      <div class="modal-actions" style="justify-content:center;">
+        <button type="button" class="btn btn-ghost" id="confirm-cancel">${escapeHtml(cancelLabel)}</button>
+        <button type="button" class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="confirm-ok">${escapeHtml(confirmLabel)}</button>
+      </div>
+    `);
+
+    function finish(result) {
+      if (resolved) return;
+      resolved = true;
+      resolve(result);
+    }
+    backdrop.querySelector('#confirm-cancel').addEventListener('click', () => backdrop.remove());
+    backdrop.querySelector('#confirm-ok').addEventListener('click', () => { finish(true); backdrop.remove(); });
+
+    // Cualquier otra vía de cierre (clic fuera, Escape, o el botón Cancelar de arriba)
+    // equivale a cancelar; se detecta de forma unificada cuando el backdrop sale del DOM.
+    const observer = new MutationObserver(() => {
+      if (!document.body.contains(backdrop)) {
+        finish(false);
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true });
+  });
 }
 
 function openEditFolderModal(doctor) {
@@ -630,9 +702,9 @@ function renderPatient(patientId) {
         wrap.innerHTML = `<div class="empty-state"><h3>Sin registro fotográfico</h3><p>${isOwner ? 'Incorpore la primera fotografía de seguimiento clínico.' : 'El médico titular aún no ha incorporado registro fotográfico a este expediente.'}</p></div>`;
         return;
       }
-      wrap.innerHTML = `<div class="photo-grid">${photos.map((ph) => `
-        <div class="photo-card view-enter" data-id="${ph.id}">
-          <img src="/media/photos/${ph.filename}" alt="Fotografía de seguimiento clínico" data-lightbox="${ph.id}">
+      wrap.innerHTML = `<div class="photo-grid">${photos.map((ph, idx) => `
+        <div class="photo-card view-enter" style="${staggerStyle(idx)}" data-id="${ph.id}">
+          <img src="/media/photos/${ph.filename}" alt="Fotografía de seguimiento clínico" data-lightbox="${ph.id}" loading="lazy">
           <div class="photo-card-body">
             <div class="photo-date">${fmtDate(ph.fecha_foto)}</div>
             <div class="photo-desc">${escapeHtml(ph.descripcion)}</div>
@@ -655,7 +727,7 @@ function renderPatient(patientId) {
       });
       wrap.querySelectorAll('.del-photo-btn').forEach((btn) => {
         btn.addEventListener('click', async () => {
-          if (!confirm('¿Confirma la supresión de esta fotografía? Esta acción es irreversible.')) return;
+          if (!(await confirmDialog({ message: '¿Confirma la supresión de esta fotografía? Esta acción es irreversible.' }))) return;
           try {
             await api('DELETE', `/api/photos/${btn.dataset.id}`);
             toast('Registro fotográfico suprimido satisfactoriamente');
@@ -670,7 +742,7 @@ function renderPatient(patientId) {
     if (isOwner) {
       document.getElementById('edit-patient-btn').addEventListener('click', () => openPatientModal(patient.doctor_id, patient));
       document.getElementById('delete-patient-btn').addEventListener('click', async () => {
-        if (!confirm(`¿Confirma la supresión del expediente de ${patient.nombre} ${patient.apellidos} y la totalidad de su registro fotográfico? Esta acción es irreversible.`)) return;
+        if (!(await confirmDialog({ message: `¿Confirma la supresión del expediente de ${patient.nombre} ${patient.apellidos} y la totalidad de su registro fotográfico? Esta acción es irreversible.` }))) return;
         try {
           await api('DELETE', `/api/patients/${patient.id}`);
           toast('Expediente suprimido satisfactoriamente');
@@ -685,6 +757,7 @@ function renderPatient(patientId) {
 function openLightbox(photo) {
   const backdrop = document.createElement('div');
   backdrop.className = 'lightbox-backdrop';
+  backdrop.tabIndex = -1;
   backdrop.innerHTML = `
     <button class="icon-btn lightbox-close" id="lb-close" style="background:rgba(255,255,255,.12); border:none;">✕</button>
     <img src="/media/photos/${photo.filename}" alt="">
@@ -694,9 +767,48 @@ function openLightbox(photo) {
     </div>
   `;
   document.body.appendChild(backdrop);
+  backdrop.focus();
   const close = () => backdrop.remove();
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  backdrop.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
   backdrop.querySelector('#lb-close').addEventListener('click', close);
+}
+
+function openLibraryLightbox(item) {
+  const url = `/media/biblioteca/${item.filename}`;
+  const ext = ((item.original_name || item.filename).split('.').pop() || '').toLowerCase();
+  let mediaHtml;
+  if (item.categoria === 'imagen') {
+    mediaHtml = `<img src="${url}" alt="${escapeHtml(item.titulo)}">`;
+  } else if (item.categoria === 'video') {
+    mediaHtml = `<video src="${url}" controls autoplay></video>`;
+  } else if (ext === 'pdf') {
+    mediaHtml = `<iframe src="${url}" title="${escapeHtml(item.titulo)}"></iframe>`;
+  } else {
+    mediaHtml = `
+      <div class="lib-lightbox-fallback">
+        <span class="lib-icon">📄</span>
+        <p>La vista previa no está disponible para este formato de archivo.</p>
+        <a class="btn btn-primary" href="${url}" download="${escapeHtml(item.original_name || item.titulo)}">Descargar archivo</a>
+      </div>`;
+  }
+  const backdrop = document.createElement('div');
+  backdrop.className = 'lightbox-backdrop';
+  backdrop.tabIndex = -1;
+  backdrop.innerHTML = `
+    <button class="icon-btn lightbox-close" id="lib-lb-close" style="background:rgba(255,255,255,.12); border:none;">✕</button>
+    ${mediaHtml}
+    <div class="lightbox-info">
+      <p style="font-weight:600; color:#F3EFE4; margin-bottom:4px;">${escapeHtml(item.titulo)}</p>
+      ${item.descripcion ? `<p>${escapeHtml(item.descripcion)}</p>` : ''}
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.focus();
+  const close = () => backdrop.remove();
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+  backdrop.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  backdrop.querySelector('#lib-lb-close').addEventListener('click', close);
 }
 
 function openUploadPhotoModal(patientId, onDone) {
@@ -854,7 +966,7 @@ function renderAdmin() {
       `;
       content.querySelectorAll('.del-user').forEach((btn) => {
         btn.addEventListener('click', async () => {
-          if (!confirm('¿Confirma la supresión de este facultativo, su carpeta clínica y la totalidad de los expedientes y registros fotográficos asociados? Esta acción es irreversible.')) return;
+          if (!(await confirmDialog({ message: '¿Confirma la supresión de este facultativo, su carpeta clínica y la totalidad de los expedientes y registros fotográficos asociados? Esta acción es irreversible.' }))) return;
           try {
             await api('DELETE', `/api/admin/users/${btn.dataset.id}`);
             toast('Facultativo suprimido del sistema satisfactoriamente');
@@ -914,7 +1026,7 @@ function renderAdmin() {
       });
       content.querySelectorAll('.restore-btn').forEach((btn) => {
         btn.addEventListener('click', async () => {
-          if (!confirm(`¿Confirma la restauración de la base de datos a partir de "${btn.dataset.file}"? Los datos actuales serán reemplazados (se generará automáticamente una copia de seguridad del estado presente antes de proceder).`)) return;
+          if (!(await confirmDialog({ title: 'Confirmar restauración', message: `¿Confirma la restauración de la base de datos a partir de "${btn.dataset.file}"? Los datos actuales serán reemplazados (se generará automáticamente una copia de seguridad del estado presente antes de proceder).`, confirmLabel: 'Restaurar', danger: false }))) return;
           try {
             await api('POST', `/api/admin/backups/${encodeURIComponent(btn.dataset.file)}/restore`);
             toast('Base de datos restaurada satisfactoriamente. Actualizando la sesión...');
@@ -932,5 +1044,186 @@ function renderAdmin() {
     });
 
     await showUsers();
+  });
+}
+
+/* ==========================================================================
+   BIBLIOTECA CLÍNICA — materiales bibliográficos (imágenes, video, documentos)
+   Consulta abierta a todo el cuerpo facultativo; edición exclusiva del cuerpo administrativo.
+   ========================================================================== */
+
+function renderLibrary() {
+  withIrisTransition(async () => {
+    shell(`<div class="loading-block"><div class="aperture-spin"></div></div>`);
+
+    const root = document.getElementById('view-root');
+    root.innerHTML = `
+      <div class="page-head">
+        <div>
+          <span class="eyebrow">Acervo Bibliográfico</span>
+          <h1>Biblioteca Clínica</h1>
+          <p class="page-sub">Material de consulta del servicio — imágenes, video y documentos — accesible a la totalidad del cuerpo facultativo. La incorporación, modificación y supresión de contenido constituye prerrogativa exclusiva del cuerpo administrativo.</p>
+        </div>
+        ${state.user.is_admin ? `<button id="lib-upload-btn" class="btn btn-gold btn-sm">+ Incorporar material</button>` : ''}
+      </div>
+      <div id="library-grid-wrap"></div>
+    `;
+
+    async function loadItems() {
+      const wrap = document.getElementById('library-grid-wrap');
+      wrap.innerHTML = `<div class="loading-block"><div class="aperture-spin"></div></div>`;
+      try {
+        const data = await api('GET', '/api/library');
+        renderGrid(wrap, data.items);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+
+    function renderGrid(wrap, items) {
+      if (!items.length) {
+        wrap.innerHTML = `<div class="empty-state"><h3>Aún no se ha incorporado material</h3><p>${state.user.is_admin ? 'Incorpore el primer recurso mediante el control dispuesto en la parte superior.' : 'El cuerpo administrativo aún no ha incorporado material a la biblioteca clínica.'}</p></div>`;
+        return;
+      }
+      wrap.innerHTML = `<div class="library-grid">${items.map((it, idx) => `
+        <div class="library-card view-enter" style="${staggerStyle(idx)}" data-id="${it.id}">
+          <button type="button" class="lib-card-preview lib-cat-${it.categoria} lib-open-btn" data-id="${it.id}" aria-label="Ver ${escapeHtml(it.titulo)}">
+            ${it.categoria === 'imagen'
+              ? `<img src="/media/biblioteca/${it.filename}" alt="${escapeHtml(it.titulo)}" loading="lazy">`
+              : `<span class="lib-icon">${it.categoria === 'video' ? '🎬' : '📄'}</span>`}
+          </button>
+          <div class="lib-card-body">
+            <h4>${escapeHtml(it.titulo)}</h4>
+            ${it.descripcion ? `<p class="lib-desc">${escapeHtml(it.descripcion)}</p>` : ''}
+            <div class="lib-meta">
+              <span>${escapeHtml(it.uploader_nombre || '—')}</span>
+              <span>${fmtDate(it.created_at)}</span>
+            </div>
+            <div class="lib-actions">
+              <button type="button" class="btn btn-ghost btn-sm lib-open-btn" data-id="${it.id}">Ver</button>
+              <a class="btn btn-ghost btn-sm" href="/media/biblioteca/${it.filename}" download="${escapeHtml(it.original_name || it.titulo)}" title="Descargar archivo">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+              </a>
+              ${state.user.is_admin ? `
+                <button class="btn btn-ghost btn-sm lib-edit-btn" data-id="${it.id}">Modificar</button>
+                <button class="btn btn-danger btn-sm lib-del-btn" data-id="${it.id}">Suprimir</button>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `).join('')}</div>`;
+
+      const byId = Object.fromEntries(items.map((i) => [String(i.id), i]));
+      wrap.querySelectorAll('.lib-open-btn').forEach((btn) => {
+        btn.addEventListener('click', () => openLibraryLightbox(byId[btn.dataset.id]));
+      });
+      wrap.querySelectorAll('.lib-edit-btn').forEach((btn) => {
+        btn.addEventListener('click', () => openEditLibraryModal(byId[btn.dataset.id], loadItems));
+      });
+      wrap.querySelectorAll('.lib-del-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!(await confirmDialog({ message: '¿Confirma la supresión de este material? Esta acción es irreversible.' }))) return;
+          try {
+            await api('DELETE', `/api/library/${btn.dataset.id}`);
+            toast('Material suprimido satisfactoriamente');
+            loadItems();
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      });
+    }
+
+    await loadItems();
+
+    if (state.user.is_admin) {
+      document.getElementById('lib-upload-btn').addEventListener('click', () => openUploadLibraryModal(loadItems));
+    }
+  });
+}
+
+function openUploadLibraryModal(onDone) {
+  const backdrop = openModal(`
+    <h2>Incorporación de Material Bibliográfico</h2>
+    <span class="modal-sub">Admite imágenes, video y documentos (PDF, Word, Excel, PowerPoint). Tamaño máximo: 150MB.</span>
+    <div class="form-error" id="lib-error"></div>
+    <form id="library-form">
+      <div class="dropzone" id="lib-dropzone">
+        <strong>Pulse para seleccionar un archivo</strong> o arrástrelo hasta este recuadro
+        <div id="lib-file-name" style="margin-top:10px; font-weight:600; color:var(--teal); display:none;"></div>
+      </div>
+      <input type="file" id="lib-file-input" accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.odt" style="display:none">
+      <div class="field"><label>Título</label><input name="titulo" required placeholder="Ej: Guía de manejo del glaucoma"></div>
+      <div class="field"><label>Descripción (opcional)</label><textarea name="descripcion" rows="2" placeholder="Breve reseña del contenido del material"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="lib-cancel">Cancelar</button>
+        <button type="submit" class="btn btn-primary" id="lib-submit">Incorporar material</button>
+      </div>
+    </form>
+  `);
+  const dz = backdrop.querySelector('#lib-dropzone');
+  const fileInput = backdrop.querySelector('#lib-file-input');
+  const fileNameEl = backdrop.querySelector('#lib-file-name');
+  let selectedFile = null;
+
+  dz.addEventListener('click', () => fileInput.click());
+  ['dragover'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('dragover'); }));
+  ['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('dragover'); }));
+  dz.addEventListener('drop', (e) => {
+    if (e.dataTransfer.files[0]) { selectedFile = e.dataTransfer.files[0]; showFileName(); }
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) { selectedFile = fileInput.files[0]; showFileName(); }
+  });
+  function showFileName() {
+    fileNameEl.textContent = selectedFile.name;
+    fileNameEl.style.display = 'block';
+  }
+
+  backdrop.querySelector('#lib-cancel').addEventListener('click', () => backdrop.remove());
+  backdrop.querySelector('#library-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errBox = backdrop.querySelector('#lib-error');
+    if (!selectedFile) { errBox.textContent = 'Debe seleccionar un archivo para continuar.'; errBox.classList.add('show'); return; }
+    const fd = new FormData(e.target);
+    fd.append('archivo', selectedFile);
+    const submitBtn = backdrop.querySelector('#lib-submit');
+    submitBtn.disabled = true; submitBtn.textContent = 'Incorporando...';
+    try {
+      await api('POST', '/api/library', fd, true);
+      toast('Material incorporado satisfactoriamente');
+      backdrop.remove();
+      onDone();
+    } catch (err) {
+      errBox.textContent = err.message; errBox.classList.add('show');
+      submitBtn.disabled = false; submitBtn.textContent = 'Incorporar material';
+    }
+  });
+}
+
+function openEditLibraryModal(item, onDone) {
+  const backdrop = openModal(`
+    <h2>Modificación del Material</h2>
+    <div class="form-error" id="libf-error"></div>
+    <form id="edit-library-form">
+      <div class="field"><label>Título</label><input name="titulo" required value="${escapeHtml(item.titulo)}"></div>
+      <div class="field"><label>Descripción</label><textarea name="descripcion" rows="2">${escapeHtml(item.descripcion || '')}</textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="libf-cancel">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Registrar modificaciones</button>
+      </div>
+    </form>
+  `);
+  backdrop.querySelector('#libf-cancel').addEventListener('click', () => backdrop.remove());
+  backdrop.querySelector('#edit-library-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = Object.fromEntries(new FormData(e.target).entries());
+    try {
+      await api('PATCH', `/api/library/${item.id}`, payload);
+      toast('Material actualizado satisfactoriamente');
+      backdrop.remove();
+      onDone();
+    } catch (err) {
+      const box = backdrop.querySelector('#libf-error');
+      box.textContent = err.message; box.classList.add('show');
+    }
   });
 }

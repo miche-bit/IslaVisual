@@ -12,6 +12,7 @@ const { router: doctorsRoutes } = require('./routes/doctors');
 const patientsRoutes = require('./routes/patients');
 const photosRoutes = require('./routes/photos');
 const adminRoutes = require('./routes/admin');
+const { router: libraryRoutes, LIBRARY_DIR } = require('./routes/library');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,12 +30,21 @@ app.use('/api/doctors', doctorsRoutes);
 app.use('/api/patients', patientsRoutes);
 app.use('/api/photos', photosRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/library', libraryRoutes);
 
 // Acceso a imágenes: SOLO usuarios autenticados (info médica sensible, no debe ser pública)
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads', 'photos');
 app.get('/media/photos/:filename', requireAuth, (req, res) => {
   const safeName = path.basename(req.params.filename);
   const filePath = path.join(UPLOADS_DIR, safeName);
+  if (!fs.existsSync(filePath)) return res.status(404).send('No encontrada');
+  res.sendFile(filePath);
+});
+
+// Acceso al material de la Biblioteca Clínica: consulta abierta a todo facultativo autenticado
+app.get('/media/biblioteca/:filename', requireAuth, (req, res) => {
+  const safeName = path.basename(req.params.filename);
+  const filePath = path.join(LIBRARY_DIR, safeName);
   if (!fs.existsSync(filePath)) return res.status(404).send('No encontrada');
   res.sendFile(filePath);
 });
