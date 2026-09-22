@@ -72,6 +72,11 @@ public/
   con `is_admin = 1` y permite consultar la totalidad del cuerpo
   facultativo registrado, conferir o revocar prerrogativas administrativas,
   suprimir cuentas y gestionar respaldos.
+- La **Biblioteca Clínica** (`/#/biblioteca`) es consultable por la
+  totalidad del cuerpo facultativo autenticado; la incorporación,
+  modificación y supresión de material (imágenes, video, documentos) es
+  prerrogativa exclusiva del cuerpo administrativo. Admite archivos de
+  hasta 150MB.
 
 ## Desplegar en Railway (con datos persistentes)
 
@@ -100,6 +105,14 @@ public/
   Antes de restaurar, la aplicación consigna automáticamente una copia de
   seguridad del estado actual, por si fuese necesario revertir la
   restauración.
+- **Alcance actual:** los respaldos cubren la base de datos (registros de
+  facultativos, pacientes, hojas de cargo y metadatos de archivos). Los
+  archivos en sí (fotografías de seguimiento y material de la Biblioteca
+  Clínica) viven en el volumen persistente de Railway y no se pierden
+  entre despliegues, pero no están incluidos dentro del propio archivo de
+  respaldo `.db`. Si en el futuro se requiere una copia de seguridad que
+  también empaquete esos archivos, puede ampliarse `backup.js` para
+  incluir la carpeta `uploads/`.
 
 ## Sobre la capacidad para 500+ facultativos simultáneos
 
@@ -165,3 +178,31 @@ funcionales en móvil y escritorio. Resumen de lo encontrado y corregido:
 - **Tabla del panel de administración sin pista de scroll:** en móvil se
   puede desplazar horizontalmente pero no había ninguna indicación visual
   de ello; se añadió un texto de ayuda.
+
+### Segunda ronda: animaciones y accesibilidad de interacción
+
+- **`prefers-reduced-motion` no se respetaba en ningún lugar:** quien tiene
+  activada esta preferencia del sistema (sensibilidad vestibular, mareo por
+  movimiento) recibía todas las animaciones igual que cualquier otro
+  usuario. Se añadió soporte global por CSS, y la transición de "apertura
+  de iris" ahora se omite por completo para esas personas en vez de solo
+  acelerarse (evitando una pausa en blanco sin sentido).
+- **Los modales no recibían foco ni se cerraban con Escape:** se corrigió
+  con foco automático en el primer campo visible al abrir (evitando
+  enfocar accidentalmente un `<input type="file">` oculto) y cierre con
+  la tecla Escape.
+- **`confirm()` nativo del navegador** en cada acción destructiva: no se
+  puede animar ni estilizar y rompe la identidad visual. Se reemplazó por
+  un diálogo de confirmación propio, animado, coherente con el resto de
+  la interfaz.
+- **La Biblioteca Clínica abría todo en pestaña nueva:** ahora imágenes y
+  video se previsualizan embebidos y los PDF se muestran inline; el resto
+  de formatos ofrece una descarga clara con el nombre original del
+  archivo (antes se habría descargado con el nombre interno aleatorio).
+- **Entrada escalonada** en las cuatro cuadrículas de la app (carpetas,
+  pacientes, fotos, biblioteca) en vez de que todas las tarjetas aparezcan
+  de golpe; `loading="lazy"` en las imágenes para no saturar conexiones
+  lentas.
+- **Botones sólidos sin retroalimentación de movimiento:** ahora se
+  "levantan" ligeramente al pasar el cursor (protegido con `hover:hover`
+  para no quedar pegado al tocar en pantallas táctiles).
