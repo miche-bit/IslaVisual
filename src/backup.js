@@ -1,16 +1,18 @@
 'use strict';
 
+const { dropPolicyTriggers } = require('./policies');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const db = require('./db');
-
-const DB_PATH = db.DB_PATH;
-const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, '..', 'backups');
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads');
+const { PHOTOS_DIR, LIBRARY_DIR, BACKUP_DIR } = require('./paths');
 
 const MAX_BACKUPS = 30; // conserva los últimos 30 respaldos automáticos
 
-if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+// Tablas con datos clínicos que se restauran. `sessions` y `backup_log` no se
+// tocan: así el administrador conserva su sesión y el historial de respaldos
+// sigue reflejando los archivos que existen en disco.
+const RESTORABLE_TABLES = ['users', 'patients', 'photos', 'library_items', 'patient_notes'];
 
 function timestamp() {
   const d = new Date();
@@ -21,22 +23,19 @@ function timestamp() {
 }
 
 /**
- * Hace un checkpoint del WAL para asegurar que todo lo escrito esté
- * volcado al archivo principal .db antes de copiarlo.
+ * VACUUM INTO produce una instantánea consistente de la base de datos aunque
+ * haya escrituras en curso (a diferencia de copiar el archivo a mano).
  */
-function checkpoint() {
-  try {
-    db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-  } catch (e) {
-    console.error('Error en checkpoint WAL:', e.message);
-  }
-}
-
 function createBackup(type = 'auto') {
-  checkpoint();
-  const file = `islavisual-${timestamp()}-${type}.db`;
-  const dest = path.join(BACKUP_DIR, file);
-  fs.copyFileSync(DB_PATH, dest);
+  let file = `islavisual-${timestamp()}-${type}.db`;
+  let dest = path.join(BACKUP_DIR, file);
+  // Dos respaldos en el mismo segundo (p. ej. pre-restore + manual) no deben pisarse.
+  let n = 1;
+  while (fs.existsSync(dest)) {
+    file = `islavisual-${timestamp()}-${type}-${n++}.db`;
+    dest = path.join(BACKUP_DIR, file);
+  }
+  db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
   const size = fs.statSync(dest).size;
 
   db.prepare('INSERT INTO backup_log (filename, size_bytes, type) VALUES (?, ?, ?)').run(file, size, type);
@@ -49,8 +48,7 @@ function createBackup(type = 'auto') {
 function pruneOldBackups() {
   const autos = listBackups().filter((b) => b.type === 'auto');
   if (autos.length <= MAX_BACKUPS) return;
-  const toDelete = autos.slice(MAX_BACKUPS);
-  for (const b of toDelete) {
+  for (const b of autos.slice(MAX_BACKUPS)) {
     try {
       fs.unlinkSync(path.join(BACKUP_DIR, b.filename));
     } catch (_) {
@@ -61,48 +59,84 @@ function pruneOldBackups() {
 }
 
 function listBackups() {
-  const rows = db.prepare('SELECT * FROM backup_log ORDER BY created_at DESC').all();
-  // filtra los que ya no existen físicamente
+  const rows = db.prepare('SELECT * FROM backup_log ORDER BY created_at DESC, id DESC').all();
   return rows.filter((r) => fs.existsSync(path.join(BACKUP_DIR, r.filename)));
 }
 
-function restoreBackup(filename) {
-  const src = path.join(BACKUP_DIR, filename);
+/**
+ * Restauración segura con la base de datos abierta: se adjunta la copia como
+ * una base de datos secundaria y se reemplaza el contenido tabla por tabla
+ * dentro de una transacción (todo o nada). Solo se copian las columnas que
+ * existen en ambas versiones, y al final se re-ejecutan las migraciones, de
+ * modo que restaurar una copia de una versión anterior deja la app funcional.
+ */
+function restoreBackup(filename, { keepToken = null, keepUser = null } = {}) {
+  const safeName = path.basename(filename);
+  const src = path.join(BACKUP_DIR, safeName);
   if (!fs.existsSync(src)) throw new Error('La copia de seguridad especificada no existe.');
 
-  // Respaldo de seguridad del estado actual antes de restaurar, por si acaso
+  // Respaldo del estado actual antes de restaurar, por si fuese necesario revertir.
   createBackup('pre-restore');
 
-  checkpoint();
-  fs.copyFileSync(src, DB_PATH);
-
-  // Limpia los archivos WAL/SHM viejos para forzar a SQLite a releer el .db restaurado
-  const walPath = DB_PATH + '-wal';
-  const shmPath = DB_PATH + '-shm';
+  // Los disparadores de política se retiran mientras se reemplazan las tablas completas
+  // (runMigrations los vuelve a crear al terminar).
+  dropPolicyTriggers(db);
+  db.exec(`ATTACH DATABASE '${src.replace(/'/g, "''")}' AS bk`);
+  db.exec('PRAGMA foreign_keys = OFF');
   try {
-    if (fs.existsSync(walPath)) fs.unlinkSync(walPath);
-    if (fs.existsSync(shmPath)) fs.unlinkSync(shmPath);
-  } catch (_) {}
+    const backupTables = new Set(
+      db.prepare("SELECT name FROM bk.sqlite_master WHERE type = 'table'").all().map((r) => r.name)
+    );
+    db.exec('BEGIN');
+    try {
+      for (const table of RESTORABLE_TABLES) {
+        db.exec(`DELETE FROM main.${table}`);
+        if (!backupTables.has(table)) continue; // la tabla no existía en esa versión
+        const mainCols = db.columnsOf(table, 'main');
+        const bkCols = new Set(db.columnsOf(table, 'bk'));
+        const common = mainCols.filter((c) => bkCols.has(c)).map((c) => `"${c}"`).join(', ');
+        db.exec(`INSERT INTO main.${table} (${common}) SELECT ${common} FROM bk.${table}`);
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+    db.exec('DETACH DATABASE bk');
+  }
 
+  db.runMigrations();
+
+  // Las sesiones se identifican por id de usuario. Tras restaurar, un mismo id podría
+  // corresponder a otra persona (p. ej. si la copia proviene de otra instalación), así que
+  // se cierran todas las sesiones salvo la del administrador que restaura, y esta solo
+  // se conserva si su cuenta sigue siendo la misma (mismo id y mismo correo).
+  db.prepare('DELETE FROM sessions WHERE token <> ?').run(keepToken || '');
+  if (keepToken && keepUser) {
+    const same = db.prepare('SELECT id FROM users WHERE id = ? AND email = ?').get(keepUser.id, keepUser.email);
+    if (!same) db.prepare('DELETE FROM sessions WHERE token = ?').run(keepToken);
+  }
   return true;
 }
 
-function getUploadsFolderSize() {
+function folderSize(dir) {
   let total = 0;
-  function walk(dir) {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(p);
-      else total += fs.statSync(p).size;
-    }
+  if (!fs.existsSync(dir)) return 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) total += folderSize(p);
+    else total += fs.statSync(p).size;
   }
-  walk(UPLOADS_DIR);
   return total;
 }
 
+function getUploadsFolderSize() {
+  return folderSize(PHOTOS_DIR) + folderSize(LIBRARY_DIR);
+}
+
 function startScheduledBackups(intervalHours = 6) {
-  // Respaldo inicial al arrancar, y luego cada N horas
   setTimeout(() => {
     try {
       createBackup('auto');
@@ -129,5 +163,4 @@ module.exports = {
   startScheduledBackups,
   getUploadsFolderSize,
   BACKUP_DIR,
-  DB_PATH,
 };

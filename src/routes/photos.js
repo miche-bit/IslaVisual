@@ -7,11 +7,18 @@ const crypto = require('node:crypto');
 const multer = require('multer');
 const db = require('../db');
 const { requireAuth } = require('../auth-middleware');
+const { PHOTOS_DIR: UPLOADS_DIR } = require('../paths');
+const { authorize, ownedRun } = require('../policies');
+const { checkSignature } = require('../file-signature');
 
 const router = express.Router();
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads', 'photos');
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+function isValidDate(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s || ''))) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
@@ -29,17 +36,21 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB por foto
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
-    if (!ALLOWED.has(ext)) return cb(new Error('Formato de imagen no permitido.'));
+    if (!ALLOWED.has(ext)) return cb(new Error('El formato de la imagen consignada no se encuentra entre los admitidos por el sistema.'));
     cb(null, true);
   },
 });
 
 function assertOwnerOfPatient(req, res, patient) {
-  if (req.user.id !== patient.doctor_id) {
-    res.status(403).json({ error: 'La incorporación y supresión de registros fotográficos constituye prerrogativa exclusiva del médico titular de esta carpeta clínica.' });
-    return false;
-  }
-  return true;
+  return authorize(req, res, 'photos', 'insert', patient);
+}
+
+/** Antes de recibir el archivo: un no titular no puede ni siquiera ocupar disco. */
+function ownPatientBeforeUpload(req, res, next) {
+  const patient = db.prepare('SELECT id, doctor_id FROM patients WHERE id = ?').get(req.params.patientId);
+  if (!patient) return res.status(404).json({ error: 'No se ha localizado el expediente del paciente solicitado.' });
+  if (!assertOwnerOfPatient(req, res, patient)) return;
+  next();
 }
 
 // Listar fotos de un paciente: accesible a la totalidad del cuerpo facultativo
@@ -55,7 +66,7 @@ router.get('/patient/:patientId', requireAuth, (req, res) => {
 });
 
 // Incorporar fotografía: prerrogativa exclusiva del médico titular; requiere descripción y fecha
-router.post('/patient/:patientId', requireAuth, upload.single('photo'), (req, res) => {
+router.post('/patient/:patientId', requireAuth, ownPatientBeforeUpload, upload.single('photo'), (req, res) => {
   const patient = db.prepare('SELECT * FROM patients WHERE id = ?').get(req.params.patientId);
   if (!patient) {
     if (req.file) fs.unlink(req.file.path, () => {});
@@ -66,11 +77,20 @@ router.post('/patient/:patientId', requireAuth, upload.single('photo'), (req, re
     return;
   }
   if (!req.file) return res.status(400).json({ error: 'Debe adjuntarse una imagen fotográfica para completar la solicitud.' });
+  // El contenido real del archivo debe corresponder a una imagen (no basta la extensión).
+  if (!checkSignature(req.file.path, path.extname(req.file.originalname || ''))) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: 'El contenido del archivo no corresponde a una imagen válida.' });
+  }
 
   const { descripcion, fecha_foto } = req.body || {};
   if (!descripcion || !descripcion.trim() || !fecha_foto) {
     fs.unlink(req.file.path, () => {});
     return res.status(400).json({ error: 'La descripción clínica y la fecha de captura constituyen campos obligatorios.' });
+  }
+  if (!isValidDate(fecha_foto)) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: 'La fecha de captura consignada no resulta válida.' });
   }
 
   const info = db
@@ -89,14 +109,14 @@ router.patch('/:id', requireAuth, (req, res) => {
   const photo = db.prepare('SELECT * FROM photos WHERE id = ?').get(req.params.id);
   if (!photo) return res.status(404).json({ error: 'No se ha localizado el registro fotográfico solicitado.' });
   const patient = db.prepare('SELECT * FROM patients WHERE id = ?').get(photo.patient_id);
-  if (!assertOwnerOfPatient(req, res, patient)) return;
+  if (!authorize(req, res, 'photos', 'update', patient)) return;
 
   const { descripcion, fecha_foto } = req.body || {};
-  db.prepare('UPDATE photos SET descripcion = ?, fecha_foto = ? WHERE id = ?').run(
-    descripcion?.trim() || photo.descripcion,
-    fecha_foto || photo.fecha_foto,
-    photo.id
-  );
+  if (fecha_foto && !isValidDate(fecha_foto)) {
+    return res.status(400).json({ error: 'La fecha de captura consignada no resulta válida.' });
+  }
+  const stmt = db.prepare('UPDATE photos SET descripcion = ?, fecha_foto = ? WHERE id = ? AND doctor_id = ?');
+  if (!ownedRun(res, stmt, [descripcion?.trim() || photo.descripcion, fecha_foto || photo.fecha_foto, photo.id, req.user.id], 'photos')) return;
   const fresh = db.prepare('SELECT * FROM photos WHERE id = ?').get(photo.id);
   res.json({ photo: fresh });
 });
@@ -106,10 +126,10 @@ router.delete('/:id', requireAuth, (req, res) => {
   const photo = db.prepare('SELECT * FROM photos WHERE id = ?').get(req.params.id);
   if (!photo) return res.status(404).json({ error: 'No se ha localizado el registro fotográfico solicitado.' });
   const patient = db.prepare('SELECT * FROM patients WHERE id = ?').get(photo.patient_id);
-  if (!assertOwnerOfPatient(req, res, patient)) return;
+  if (!authorize(req, res, 'photos', 'delete', patient)) return;
 
-  db.prepare('DELETE FROM photos WHERE id = ?').run(photo.id);
-  fs.unlink(path.join(UPLOADS_DIR, photo.filename), () => {});
+  if (!ownedRun(res, db.prepare('DELETE FROM photos WHERE id = ? AND doctor_id = ?'), [photo.id, req.user.id], 'photos')) return;
+  fs.unlink(path.join(UPLOADS_DIR, path.basename(photo.filename)), () => {});
   res.json({ ok: true });
 });
 

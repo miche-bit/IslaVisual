@@ -2,14 +2,19 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>IslaVisual · Historia clínica compartida</title>
-<meta name="description" content="IslaVisual — plataforma para el grupo de oftalmólogos: carpetas de médicos, pacientes y seguimiento fotográfico de cirugías.">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0A332E">
+<title>IslaVisual · Historia clínica hospitalaria</title>
+<meta name="description" content="IslaVisual — plataforma clínica del hospital: carpetas de facultativos por especialidad, expedientes de pacientes, seguimiento fotográfico y biblioteca clínica.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%230E4B44'/%3E%3Ccircle cx='16' cy='16' r='9' fill='%23C48A3B'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%230A332E'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
+  <div id="net-bar" class="net-bar" aria-hidden="true"></div>
+  <div id="offline-banner" class="offline-banner" role="status" hidden><span></span></div>
   <div id="app"></div>
-  <div id="toast-wrap" class="toast-wrap"></div>
+  <div id="toast-wrap" class="toast-wrap" aria-live="polite"></div>
+  <p id="route-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></p>
   <script src="/js/app.js" defer></script>
 </body>
 </html>
